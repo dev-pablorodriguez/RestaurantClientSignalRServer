@@ -1,0 +1,92 @@
+﻿@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Home page";
+}
+
+<div class="text-center">
+    <form id="orderForm">
+        <div>
+            <label for="order">Order:</label>
+            <input type="text" id="title" name="title" required />
+        </div>
+
+        <div>
+            <label for="description">Description:</label>
+            <textarea id="description" name="description" rows="4" required></textarea>
+        </div>
+
+        <div>
+            <label for="quantity">Quantity:</label>
+            <input type="number" id="quantity" name="quantity" required min="1" />
+        </div>
+
+        <button type="submit">Create Order</button>
+    </form>
+</div>
+
+
+<div id="orderUpdates">
+    <h3>Orders:</h3>
+    <ul id="ordersList">
+        <!-- Show created orders here -->
+    </ul>
+</div>
+
+<p id="error" style="background-color: #FFEBEB;"></p>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.1/signalr.js"></script>
+<script>
+    // Connect to SignalR Hub
+    const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/orderHub")
+        .build();
+
+    // Get data from server
+    connection.on("ReceiveOrders", function(ordersJson) {
+        const orders = JSON.parse(ordersJson);
+        console.log(orders);
+        let html = "";
+        orders.forEach(i => {
+            const backgroundColor = i.Status === 'COMPLETED' ? '#DAFFD4' : '#FFEBEB';
+            html += `<li
+            style="background-color: ${ backgroundColor }; margin: 5px; border-radius: 3%; padding: 3px;"
+            ><strong>Title:</strong> ${i.Title}, <strong>Description:</strong> ${i.Description}, <strong>Quantity:</strong> ${i.Quantity}</li>`;
+        });
+
+        document.getElementById("ordersList").innerHTML = html;
+    });
+
+    // Handle errors from server
+    connection.on("Error", function(exMsg) {
+        console.log(exMsg);
+        document.getElementById("error").innerHTML = "An error has occurred :(";
+    });
+
+    // Start connection
+    connection.start().then(() => {
+        connection.invoke("OnLoad")
+    }).catch(function (err) {
+        return console.error(err.toString());
+    });
+
+    // On submit
+    document.getElementById("orderForm").addEventListener("submit", function (event) {
+        event.preventDefault();
+        // clear the error log
+        document.getElementById("error").innerHTML = "";
+
+        const title = document.getElementById("title").value;
+        const description = document.getElementById("description").value;
+        const quantity = parseInt(document.getElementById("quantity").value);
+
+
+        // Enviar los datos al Hub de SignalR
+        connection.invoke("CreateOrder", title, description, quantity).catch(function (err) {
+            return console.error(err.toString());
+        });
+
+        // Limpiar el formulario
+        document.getElementById("orderForm").reset();
+    });
+</script>
