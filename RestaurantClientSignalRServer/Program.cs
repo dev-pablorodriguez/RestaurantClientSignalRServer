@@ -13,6 +13,17 @@ namespace RestaurantClientSignalRServer
             {
                 options.EnableDetailedErrors = true;
             });
+            services.AddCors(options =>
+            {
+                options.AddPolicy("default", policy =>
+                {
+                    policy
+                         .WithOrigins("https://icy-stone-02ca7881e.2.azurestaticapps.net")
+                        .AllowAnyHeader()
+                        .AllowAnyMethod()
+                        .AllowCredentials();
+                });
+            });
 
 
             var app = builder.Build();
@@ -27,6 +38,8 @@ namespace RestaurantClientSignalRServer
 
             app.UseHttpsRedirection();
             app.UseStaticFiles();
+
+            app.UseCors("default");
 
             app.UseRouting();
 
