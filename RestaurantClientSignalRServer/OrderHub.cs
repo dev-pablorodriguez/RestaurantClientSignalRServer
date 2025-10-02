@@ -1,29 +1,42 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Azure.Storage.Blobs;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Azure.Cosmos;
 using RestaurantClientSignalRServer.Models;
-using System.Reflection.Metadata;
+using System.Text;
 using System.Text.Json;
 
 namespace RestaurantClientSignalRServer
 {
     public class OrderHub : Hub
     {
-        private readonly CosmosClient _client;
-        private readonly Container _container;
+        private readonly Container _cosmosContainer;
+        private readonly BlobContainerClient _storageContainer;
 
         public OrderHub(IConfiguration configuration) {
-            var connString = configuration.GetConnectionString("CosmosDB");
+            var cosmosConnString = configuration.GetConnectionString("CosmosDB");
+            var storageConnString = configuration.GetConnectionString("StorageAccount");
 
-            if (string.IsNullOrWhiteSpace(connString)) throw new ArgumentNullException(nameof(connString));
+            // validate connection strings
+            if (string.IsNullOrWhiteSpace(cosmosConnString)) throw new ArgumentNullException(nameof(cosmosConnString));
+            if (string.IsNullOrWhiteSpace(storageConnString)) throw new ArgumentNullException(nameof(storageConnString));
 
-            _client = new CosmosClient(connString, new CosmosClientOptions
+
+            // init cosmos container
+            CosmosClient cosmosClient = new(cosmosConnString, new CosmosClientOptions
             {
                 SerializerOptions = new CosmosSerializationOptions
                 {
                     PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase,
                 }
             });
-            _container = _client.GetContainer("prmlearning", "orders");
+            _cosmosContainer = cosmosClient.GetContainer("prmlearning", "orders");
+
+            // init storage container
+            BlobServiceClient blobServiceClient = new(storageConnString);
+            _storageContainer = blobServiceClient.GetBlobContainerClient("restaurant");
+
+            // make sure the container exists
+            _storageContainer.CreateIfNotExists();
         }
 
         #region ENDPOINTS
@@ -48,12 +61,16 @@ namespace RestaurantClientSignalRServer
             try
             {
                 // create order
-                await UpsertDocAsync(new Order
+                Order order = new()
                 {
                     Title = title,
                     Description = description,
                     Quantity = quantity,
-                });
+                };
+
+                await UpsertDocAsync(order);
+
+                
 
                 // return updated orders
                 await ReturnOrdersToClients();
@@ -105,7 +122,7 @@ namespace RestaurantClientSignalRServer
 
         private async Task<List<Order>> GetOrders()
         {
-            var query = _container.GetItemQueryIterator<Order>("SELECT * FROM c");
+            var query = _cosmosContainer.GetItemQueryIterator<Order>("SELECT * FROM c");
             var results = new List<Order>();
 
             while (query.HasMoreResults)
@@ -121,19 +138,46 @@ namespace RestaurantClientSignalRServer
         {
             try
             {
-                var response = await _container.ReadItemAsync<Order>(order.Id, new PartitionKey(order.PartitionKey));
+                var response = await _cosmosContainer.ReadItemAsync<Order>(order.Id, new PartitionKey(order.PartitionKey));
                 var orderFromDB = response.Resource;
 
                 // If found, update it
                 orderFromDB.Status = "COMPLETED";
 
-                await _container.ReplaceItemAsync(orderFromDB, order.Id, new PartitionKey(order.PartitionKey));
+                await _cosmosContainer.ReplaceItemAsync(orderFromDB, order.Id, new PartitionKey(order.PartitionKey));
+
+                // If the order was completed, generate receipt and save it in blob storage
+                await UploadFile(order);
             }
             catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 // If not found, create it
-                await _container.CreateItemAsync(order, new PartitionKey(order.PartitionKey));
+                await _cosmosContainer.CreateItemAsync(order, new PartitionKey(order.PartitionKey));
             }
+        }
+
+        private async Task UploadFile(Order order)
+        {
+            // create blob client
+            BlobClient blobClient = _storageContainer.GetBlobClient($"{order.Id}.txt");
+
+            if (await blobClient.ExistsAsync()) {
+                throw new Exception($"The file {order.Id} exists already.");
+            }
+
+            StringBuilder sb = new();
+            sb.AppendLine("Order Receipt:");
+            sb.AppendLine("==============");
+            sb.AppendLine($"ID: {order.Id}");
+            sb.AppendLine($"Title: {order.Title}");
+            sb.AppendLine($"Description: {order.Description}");
+            sb.AppendLine($"Quantity: {order.Quantity}");
+            sb.AppendLine($"Status: {order.Status}");
+
+            var byteArray = Encoding.UTF8.GetBytes(sb.ToString());
+            using var stream = new MemoryStream(byteArray);
+
+            await blobClient.UploadAsync(stream);
         }
 
         #endregion

@@ -45,7 +45,6 @@
     // Get data from server
     connection.on("ReceiveOrders", function(ordersJson) {
         const orders = JSON.parse(ordersJson);
-        console.log(orders);
         let html = "";
         orders.forEach(i => {
             const backgroundColor = i.Status === 'COMPLETED' ? '#DAFFD4' : '#FFEBEB';
