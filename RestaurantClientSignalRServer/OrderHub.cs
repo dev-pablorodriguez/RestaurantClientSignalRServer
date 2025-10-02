@@ -147,7 +147,7 @@ namespace RestaurantClientSignalRServer
                 await _cosmosContainer.ReplaceItemAsync(orderFromDB, order.Id, new PartitionKey(order.PartitionKey));
 
                 // If the order was completed, generate receipt and save it in blob storage
-                await UploadFile(order);
+                await UploadFile(orderFromDB);
             }
             catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
